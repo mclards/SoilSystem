@@ -1,0 +1,6 @@
+# Ignore build and PlatformIO files
+.pio/
+.vscode/
+.idea/
+*.bak
+*.log
