@@ -1,6 +1,26 @@
-# Ignore build and PlatformIO files
+# PlatformIO build files
 .pio/
+.ccls-cache/
+
+# Arduino build files
+build/
+*.elf
+*.bin
+*.hex
+*.map
+
+# VSCode settings (optional, but often personal)
 .vscode/
-.idea/
-*.bak
+.history/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
+
+# Backup files
+*.bak
+*.swp
+*.tmp
