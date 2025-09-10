@@ -58,6 +58,7 @@ void initRS485() {
     soilNode.postTransmission(postTransmission);
 }
 
+/* ✅ FIX: Define readSoilSensor */
 bool readSoilSensor(float& humidity, float& temperature) {
     uint8_t result = soilNode.readHoldingRegisters(0x0000, 2);
     if (result == soilNode.ku8MBSuccess) {
@@ -77,32 +78,26 @@ bool readSoilSensor(float& humidity, float& temperature) {
 /* ================== EEPROM Helpers ================== */
 void loadSettings() {
     EEPROM.begin(EEPROM_SIZE);
-
     uint16_t r, t;
     EEPROM.get(ADDR_RUNTIME, r);
     EEPROM.get(ADDR_THRESHOLD, t);
-
     if (r == 0xFFFF || r == 0) r = 20;  // default
     if (t == 0xFFFF || t == 0) t = 85;  // default
-
     pumpRuntime = r;
     threshold = t;
-
     Serial.printf("Loaded settings: runtime=%d threshold=%d\n", pumpRuntime, threshold);
 }
 
 void saveRuntime(int v) {
-    pumpRuntime = v;  // keep global in sync
-    uint16_t r = (uint16_t)v;
-    EEPROM.put(ADDR_RUNTIME, r);
+    pumpRuntime = v;
+    EEPROM.put(ADDR_RUNTIME, (uint16_t)v);
     EEPROM.commit();
     Serial.printf("Saved runtime=%d\n", v);
 }
 
 void saveThreshold(int v) {
-    threshold = v;  // keep global in sync
-    uint16_t t = (uint16_t)v;
-    EEPROM.put(ADDR_THRESHOLD, t);
+    threshold = v;
+    EEPROM.put(ADDR_THRESHOLD, (uint16_t)v);
     EEPROM.commit();
     Serial.printf("Saved threshold=%d\n", v);
 }
@@ -128,6 +123,7 @@ void setup_wifi() {
 void callback(char* topic, byte* message, unsigned int length) {
     String msg;
     for (unsigned int i = 0; i < length; i++) msg += (char)message[i];
+    Serial.printf("MQTT RX → %s : %s\n", topic, msg.c_str());
 
     if (String(topic) == topicSprinkler) {
         if (msg == "1" && !manualMode) {
@@ -140,28 +136,25 @@ void callback(char* topic, byte* message, unsigned int length) {
     } else if (String(topic) == topicRuntime) {
         int v = msg.toInt();
         if (v > 0) {
-            pumpRuntime = v; saveRuntime(pumpRuntime);
-            if (client.connected())
-                client.publish(topicRuntime, String(pumpRuntime).c_str(), true);
+            saveRuntime(v);
         }
     } else if (String(topic) == topicSprinklerLong) {
         if (msg == "1") { manualMode = true; pumpRunning = true; digitalWrite(pumpPin, HIGH); } else { manualMode = false;pumpRunning = false;digitalWrite(pumpPin, LOW); }
     } else if (String(topic) == topicThreshold) {
         int t = msg.toInt();
         if (t >= 1 && t <= 100) {
-            threshold = t; saveThreshold(threshold);
-            if (client.connected())
-                client.publish(topicThreshold, String(threshold).c_str(), true);
+            saveThreshold(t);
         }
     }
 }
 
 /* ================== Pump Runtime/Threshold Check ================== */
 void checkPumpRuntime(float moistureValue) {
-    if (pumpRunning && !manualMode) {
+    if (pumpRunning && !manualMode) {   // only if auto mode
         unsigned long elapsed = (millis() - pumpStartTime) / 1000;
         if ((pumpRuntime > 0 && elapsed >= (unsigned long)pumpRuntime) || (moistureValue >= threshold)) {
-            digitalWrite(pumpPin, LOW); pumpRunning = false;
+            digitalWrite(pumpPin, LOW);
+            pumpRunning = false;
             MqttMessage msg;
             snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinkler);
             snprintf(msg.payload, sizeof(msg.payload), "0");
@@ -239,32 +232,49 @@ void sensorTask(void* pvParameters) {
 
 /* ================== Task 3: Button ================== */
 void onClick() {
-    if (!pumpRunning) {
-        if (pumpRuntime > 0) {
-            digitalWrite(pumpPin, HIGH); pumpRunning = true; pumpStartTime = millis();
-            MqttMessage msg; snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinkler);
-            snprintf(msg.payload, sizeof(msg.payload), "1");
+    if (!manualMode) {   // only if not in manual override
+        if (!pumpRunning) {
+            if (pumpRuntime > 0) {
+                digitalWrite(pumpPin, HIGH);
+                pumpRunning = true;
+                pumpStartTime = millis();
+                MqttMessage msg;
+                snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinkler);
+                snprintf(msg.payload, sizeof(msg.payload), "1");
+                xQueueSend(mqttQueue, &msg, portMAX_DELAY);
+                Serial.println("Pump ON (Auto mode, will stop after runtime/threshold)");
+            }
+        } else {
+            digitalWrite(pumpPin, LOW);
+            pumpRunning = false;
+            MqttMessage msg;
+            snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinkler);
+            snprintf(msg.payload, sizeof(msg.payload), "0");
             xQueueSend(mqttQueue, &msg, portMAX_DELAY);
+            Serial.println("Pump OFF (Auto mode stopped manually)");
         }
-    } else if (pumpRunning && !manualMode) {
-        digitalWrite(pumpPin, LOW); pumpRunning = false;
-        MqttMessage msg; snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinkler);
-        snprintf(msg.payload, sizeof(msg.payload), "0");
-        xQueueSend(mqttQueue, &msg, portMAX_DELAY);
     }
 }
 
 void onLongPressStart() {
     if (!manualMode) {
-        manualMode = true; pumpRunning = true; digitalWrite(pumpPin, HIGH);
-        MqttMessage msg; snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinklerLong);
+        manualMode = true;
+        pumpRunning = true;
+        digitalWrite(pumpPin, HIGH);
+        MqttMessage msg;
+        snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinklerLong);
         snprintf(msg.payload, sizeof(msg.payload), "1");
         xQueueSend(mqttQueue, &msg, portMAX_DELAY);
+        Serial.println("Pump ON (Manual override mode)");
     } else {
-        manualMode = false; pumpRunning = false; digitalWrite(pumpPin, LOW);
-        MqttMessage msg; snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinklerLong);
+        manualMode = false;
+        pumpRunning = false;
+        digitalWrite(pumpPin, LOW);
+        MqttMessage msg;
+        snprintf(msg.topic, sizeof(msg.topic), "%s", topicSprinklerLong);
         snprintf(msg.payload, sizeof(msg.payload), "0");
         xQueueSend(mqttQueue, &msg, portMAX_DELAY);
+        Serial.println("Pump OFF (Manual override disabled)");
     }
 }
 
@@ -302,7 +312,7 @@ void setup() {
     if (client.connect(clientID, mqtt_user, mqtt_pass, topicLastwill, 0, true, "System Disconnected")) {
         client.publish(topicLastwill, "System Online", true);
 
-        // publish EEPROM-saved values FIRST
+        // publish EEPROM-saved values FIRST (retained)
         client.publish(topicRuntime, String(pumpRuntime).c_str(), true);
         client.publish(topicThreshold, String(threshold).c_str(), true);
 
