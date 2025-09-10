@@ -6,14 +6,14 @@
 #include <EEPROM.h>
 #include <OneButton.h>
 
-/* ================== HiveMQ Cloud ================== */
+// HiveMQ Cloud 
 const char* mqtt_server = "c33fda18bbcd4c9998277dfe166c7c4a.s1.eu.hivemq.cloud";
-const int   mqtt_port = 8883; // TLS
+const int   mqtt_port = 8883; 
 const char* mqtt_user = "gwapooo";
 const char* mqtt_pass = "_Mclards23";
 const char* clientID = "SoilMon0002";
 
-/* ================== Topics ================== */
+// Topics 
 const char* topicSprinkler = "Sprinkler";
 const char* topicRuntime = "Runtime";
 const char* topicSprinklerLong = "SprinklerLong";
@@ -22,25 +22,25 @@ const char* topicLastwill = "Lastwill";
 const char* topicJSON = "SoilSystem";
 const char* topicThreshold = "Threshold";
 
-/* ================== MQTT Objects ================== */
+// MQTT Objects
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
-/* ================== Global Variables ================== */
+// Global Variables
 bool pumpRunning = false;
 bool manualMode = false;
 unsigned long pumpStartTime = 0;
-int pumpRuntime = 20;  // default runtime (secs)
-int threshold = 85;  // default threshold (%)
+int pumpRuntime = 5;
+int threshold = 85; 
 
-/* ================== Hardware Pins ================== */
+// Hardware Pins
 int pumpPin = 2;
 int buttonPin = 15;
 
-/* ================== OneButton ================== */
+// OneButton
 OneButton oneBtn(buttonPin, true, true);
 
-/* ================== RS485 Soil Sensor ================== */
+// RS485 Soil Sensor
 #define RX2_PIN   16
 #define TX2_PIN   17
 #define RE_DE_PIN 4
@@ -58,7 +58,7 @@ void initRS485() {
     soilNode.postTransmission(postTransmission);
 }
 
-/* ✅ FIX: Define readSoilSensor */
+// Define readSoilSensor
 bool readSoilSensor(float& humidity, float& temperature) {
     uint8_t result = soilNode.readHoldingRegisters(0x0000, 2);
     if (result == soilNode.ku8MBSuccess) {
@@ -70,19 +70,19 @@ bool readSoilSensor(float& humidity, float& temperature) {
     return false;
 }
 
-/* ================== EEPROM Addresses ================== */
+// EEPROM Addresses
 #define EEPROM_SIZE     8
-#define ADDR_RUNTIME    0   // 2 bytes
-#define ADDR_THRESHOLD  2   // 2 bytes
+#define ADDR_RUNTIME    0 
+#define ADDR_THRESHOLD  2
 
-/* ================== EEPROM Helpers ================== */
+// EEPROM Helpers
 void loadSettings() {
     EEPROM.begin(EEPROM_SIZE);
     uint16_t r, t;
     EEPROM.get(ADDR_RUNTIME, r);
     EEPROM.get(ADDR_THRESHOLD, t);
-    if (r == 0xFFFF || r == 0) r = 20;  // default
-    if (t == 0xFFFF || t == 0) t = 85;  // default
+    if (r == 0xFFFF || r == 0) r = 5;
+    if (t == 0xFFFF || t == 0) t = 85;
     pumpRuntime = r;
     threshold = t;
     Serial.printf("Loaded settings: runtime=%d threshold=%d\n", pumpRuntime, threshold);
@@ -102,14 +102,14 @@ void saveThreshold(int v) {
     Serial.printf("Saved threshold=%d\n", v);
 }
 
-/* ================== Queue for MQTT messages ================== */
+// Queue for MQTT messages
 struct MqttMessage {
     char topic[64];
     char payload[256];
 };
 QueueHandle_t mqttQueue;
 
-/* ================== WiFi Setup ================== */
+// WiFi Setup 
 void setup_wifi() {
     WiFiManager wm;
     if (!wm.autoConnect("SoilSystem_Setup")) {
@@ -119,7 +119,7 @@ void setup_wifi() {
     Serial.println("WiFi connected: " + WiFi.SSID());
 }
 
-/* ================== MQTT Callback ================== */
+// MQTT Callback
 void callback(char* topic, byte* message, unsigned int length) {
     String msg;
     for (unsigned int i = 0; i < length; i++) msg += (char)message[i];
@@ -148,9 +148,9 @@ void callback(char* topic, byte* message, unsigned int length) {
     }
 }
 
-/* ================== Pump Runtime/Threshold Check ================== */
+// Pump Runtime/Threshold Check
 void checkPumpRuntime(float moistureValue) {
-    if (pumpRunning && !manualMode) {   // only if auto mode
+    if (pumpRunning && !manualMode) {
         unsigned long elapsed = (millis() - pumpStartTime) / 1000;
         if ((pumpRuntime > 0 && elapsed >= (unsigned long)pumpRuntime) || (moistureValue >= threshold)) {
             digitalWrite(pumpPin, LOW);
@@ -164,7 +164,7 @@ void checkPumpRuntime(float moistureValue) {
     }
 }
 
-/* ================== MQTT Reconnect ================== */
+// MQTT Reconnect
 bool reconnectOnce() {
     if (client.connected()) return true;
     Serial.println("MQTT: attempting connect...");
@@ -182,7 +182,7 @@ bool reconnectOnce() {
     return ok;
 }
 
-/* ================== Task 1: MQTT ================== */
+// Task 1: MQTT
 void mqttTask(void* pvParameters) {
     (void)pvParameters;
     MqttMessage msg;
@@ -207,7 +207,7 @@ void mqttTask(void* pvParameters) {
     }
 }
 
-/* ================== Task 2: Sensor ================== */
+
 void sensorTask(void* pvParameters) {
     (void)pvParameters;
     for (;;) {
@@ -230,9 +230,8 @@ void sensorTask(void* pvParameters) {
     }
 }
 
-/* ================== Task 3: Button ================== */
 void onClick() {
-    if (!manualMode) {   // only if not in manual override
+    if (!manualMode) {
         if (!pumpRunning) {
             if (pumpRuntime > 0) {
                 digitalWrite(pumpPin, HIGH);
@@ -286,11 +285,11 @@ void buttonTask(void* pvParameters) {
 
     for (;;) {
         oneBtn.tick();
-        vTaskDelay(20 / portTICK_PERIOD_MS);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
 
-/* ================== Setup ================== */
+
 void setup() {
     Serial.begin(115200);
     pinMode(pumpPin, OUTPUT); digitalWrite(pumpPin, LOW);
@@ -308,15 +307,9 @@ void setup() {
     mqttQueue = xQueueCreate(10, sizeof(MqttMessage));
     if (!mqttQueue) ESP.restart();
 
-    // ---- Connect once during setup and publish saved values before subscribing ----
     if (client.connect(clientID, mqtt_user, mqtt_pass, topicLastwill, 0, true, "System Disconnected")) {
         client.publish(topicLastwill, "System Online", true);
 
-        // publish EEPROM-saved values FIRST (retained)
-        client.publish(topicRuntime, String(pumpRuntime).c_str(), true);
-        client.publish(topicThreshold, String(threshold).c_str(), true);
-
-        // only now subscribe to topics
         client.subscribe(topicSprinkler);
         client.subscribe(topicRuntime);
         client.subscribe(topicSprinklerLong);
